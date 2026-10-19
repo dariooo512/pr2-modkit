@@ -71,9 +71,20 @@ from it. It is the game's data: `_game\` is git-ignored; keep it out of every re
 
 The disassembly tools, `pe_patch.py` and the test install read the exe's code, which
 SteamStub keeps encrypted on disk. A modder makes a DRM-free copy of **their own** exe for
-their own analysis and keeps it private; the kit includes no tool for this and no exe. This
-project used Steamless 3.1 (`techniques/03-the-exe.md` §1). Put the result at
-`_game\PR2.exe.unpacked.exe` (or set `PR2_BASE_EXE`) and check it:
+their own analysis and keeps it private; the kit includes no tool for this and no exe. Use
+Steamless (https://github.com/atom0s/Steamless, release v3.1.0.5; `techniques/03-the-exe.md`
+§1): extract its zip anywhere, then, from the kit's folder, run its command-line tool on a
+copy of your pristine exe. It writes `<input>.unpacked.exe` next to the input:
+
+```
+copy _game\original\PR2.exe _game\PR2.exe
+<steamless>\Steamless.CLI.exe _game\PR2.exe
+del _game\PR2.exe
+```
+
+Expected output ends with `--> .text section is encrypted.`, `Unpacked file saved to disk!` and
+`[Steamless] Successfully unpacked file!` (variant `Variant21.x86`). Checked with v3.1.0.5.
+The result must be at `_game\PR2.exe.unpacked.exe` (or set `PR2_BASE_EXE`); check it:
 
 ```
 certutil -hashfile _game\PR2.exe.unpacked.exe SHA256

@@ -24,9 +24,10 @@ normally, so **data mods need no DRM work at all**.
 
 **For modders only.** Static analysis (the `tools\exe\` scripts, Ghidra, Reko) and the
 file-patch build for a test install need the DRM-free image. A modder makes it from **their
-own** copy, for their own analysis: this project did this with Steamless 3.1, which wrote
-`PR2.exe.unpacked.exe` next to the input (the exact invocation was not recorded; not
-re-checked for these docs). Verify the result against the SHA-256 above. The kit does not ship Steamless or any unpacked exe.
+own** copy, for their own analysis, with Steamless (https://github.com/atom0s/Steamless):
+`Steamless.CLI.exe PR2.exe` on a copy of the exe writes `PR2.exe.unpacked.exe` next to it
+(SteamStub `Variant21.x86`; checked with v3.1.0.5, which gives exactly the SHA-256 above; the
+steps are in `getting-started.md` §5). The kit does not ship Steamless or any unpacked exe.
 Players never do this: the mod is applied in memory at launch (section 6).
 
 ## 2. `pe_patch.py`: reproducible exe patches
