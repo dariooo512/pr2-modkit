@@ -30,7 +30,8 @@ Edit `..\my-mod\dll\mod.h`:
 ```
 
 This one name is used for the DLL (`MyMod.dll`), the log (`MyMod.log`), the dev switch
-(`MyMod.dev`) and the console file (`MyMod.cmd`), all next to the game exe. Pick a prefix
+(`MyMod.dev`) and the console file (`MyMod.cmd`), all next to the game exe. `install.json`
+has its own copy of the name (`name`, `dll`, `patch_data`): change it there too. Pick a prefix
 for your Lua functions too (`MyMod_...`): Lua globals are shared with the game and with
 other mods.
 

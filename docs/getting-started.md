@@ -8,7 +8,7 @@ and whether its commands were checked for these docs.
 | Step | Who | Needs | Checked |
 |---|---|---|---|
 | 1. Steam install | players and modders | a legal copy | n/a |
-| 2. Python and packages | modders | — | yes (Python 3.12.10) |
+| 2. Python and packages | modders | — | yes (Python 3.12.10 and 3.10.0) |
 | 3. MSYS2 GCC (32-bit) | modders writing DLLs | — | yes (GCC 16.1) |
 | 4. A pristine copy of the game | modders | your game folder | no (it is a folder copy) |
 | 5. A DRM-free exe for analysis | **modders only, own copy** | your `PR2.exe` | the hash check: yes |
@@ -34,21 +34,28 @@ tools that write an exe or start the game refuse a path inside a Steam library.
 
 ## 2. Python (modders)
 
-Python 3.12 (64-bit is fine; the tools read the 32-bit exe as data):
+Python 3.10 or newer (64-bit is fine; the tools read the 32-bit exe as data):
 
 ```
 py -3.12 -m pip install pefile capstone Pillow
 ```
 
+Steps 6 to 9 and the template build were also checked with Python 3.10.0.
+
 Checked with pefile 2024.8.26, capstone 5.0.7, Pillow 12.2.0.
 
 ## 3. The C toolchain (modders writing DLLs)
 
-Install MSYS2 (default `C:\msys64`), then in the MSYS2 shell:
+Install MSYS2 (default `C:\msys64`, or `winget install MSYS2.MSYS2`), then in the MSYS2 shell:
 
 ```
 pacman -S mingw-w64-i686-gcc
 ```
+
+On a fresh install the first `pacman` call can fail with `unable to lock database` while
+MSYS2's own first-run setup is still running. Wait for it to finish (or close it), then
+run the command again; delete `C:\msys64\var\lib\pacman\db.lck` only when no `pacman.exe`
+is running.
 
 The DLL must be **32-bit**. The build scripts look for `gcc.exe` in the folder named by the
 environment variable `MINGW32_BIN`, then in MSYS2's default `C:\msys64\mingw32\bin`, then on
@@ -124,6 +131,7 @@ compiler). Checked. `make-your-own-mod.md` takes it from there.
 
 ```
 python tools\test\env.py setup
+python tools\test\env.py backup-saves
 python tools\test\env.py windowed on
 python tools\test\env.py fast-boot on
 python tools\test\env.py dpi-aware on        (only on a scaled HiDPI screen)
@@ -134,7 +142,8 @@ python tools\test\env.py dpi-aware on        (only on a scaled HiDPI screen)
 reports CLEAN or every file that differs from the pristine copy. The game always writes saves
 and `settings.cfg` to your Documents folder (found the way Windows reports it, also when it is
 redirected), **shared with your Steam install**: run `env.py backup-saves` before an experiment
-and `env.py restore-saves` after it. Checked: `status`, `deploy`/`undeploy`, `backup-saves`/
+(and before `windowed on`, which edits that `settings.cfg`) and `env.py restore-saves` after
+it. Checked: `status`, `deploy`/`undeploy`, `backup-saves`/
 `restore-saves` and the settings switches on an existing test install; `setup` itself (a folder
 copy) was not re-run for these docs.
 
