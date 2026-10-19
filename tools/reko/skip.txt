@@ -1,0 +1,11 @@
+# Seed list of functions to stub with `ret` for the whole-program Reko decode.
+#
+# An EXAMPLE of the format, and the starting point for PR2.exe 1.1.2.3 (DRM-free build) with
+# Reko 0.12.2 + reko-patches/: these two functions trip Reko's SSA StackTransformer bug
+# ("Offset must be non-negative (Parameter 'bitOffset')"), which aborts the whole run.
+# run_whole.py copies this file to <PR2_BUILD>/reko/skip.txt on first use and appends every
+# new crasher it finds there; this seed is never written.
+#
+# One function per line: fn<VA8>, 0x<VA> or <VA> (hex); '#' starts a comment.
+fn00405F00
+fn00746164

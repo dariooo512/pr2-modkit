@@ -1,0 +1,9 @@
+# Example facts for tools/exe/check_sites.py: addresses the kit's docs and template rely on.
+# Format: <where> <kind> <expected> [# note]. Kinds: insn (capstone text, ';' between
+# instructions), bytes (hex), str (NUL-terminated string). Module.dll+0xRVA reads an engine DLL.
+
+0x64E03F                 insn   push 0x74; push 0x6ae380              # entry point; load_mod_dll.py detours it (03-the-exe.md 4)
+0x5BA0A0                 insn   mov al, byte ptr [esp + 4]; cmp al, 4  # CNation::IsAtWar, the n < 4 guard (05-game-systems.md 2)
+0x6ABDD8                 str    towns\\%s_Stadtplatz.tow                # the .tow loader's file name (01-game-files.md 3)
+0x61A44A                 insn   push 0x6abdd8                          # ... pushed by the .tow loader 0x61A410
+A2dLib-2.20A.dll+0x2F2C0 bytes  53 55 56 57 8B E9                      # CWalhallaClient::InputProcessor, the frame hook (03-the-exe.md 5)

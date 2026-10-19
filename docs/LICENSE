@@ -1,0 +1,19 @@
+The documentation of pr2-modkit (the files in docs/ and the Markdown files at
+the top of the repository) is licensed under the Creative Commons Attribution
+4.0 International License (CC BY 4.0).
+
+Copyright (c) 2026 the pr2-modkit authors
+
+You may share and adapt the documentation for any purpose, including
+commercially, as long as you give appropriate credit, link to the licence and
+indicate whether you made changes.
+
+Full legal text: https://creativecommons.org/licenses/by/4.0/legalcode
+Summary: https://creativecommons.org/licenses/by/4.0/
+
+Code (tools, the template mod and any code samples meant to be copied) is
+licensed under the MIT License; see ../LICENSE.
+
+Port Royale 2 is a game by Ascaron Entertainment. This project is not
+affiliated with or endorsed by its rights holders, and contains none of the
+game's files.

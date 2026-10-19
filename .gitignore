@@ -1,0 +1,26 @@
+# Build output
+_build/
+__pycache__/
+*.pyc
+*.o
+*.obj
+
+# Never commit game files or anything copied from them.
+# (.screen and .res are not ignored because a mod may author its own; check that a
+# file you add is yours and not a modified game file.)
+*.exe
+*.dll
+*.cpr
+*.pr2
+*.aim
+*.tow
+*.bin
+_workdir/
+original/
+saves/
+_game/
+
+# Logs, dev switch and console files from test runs
+*.log
+*.dev
+HelloMod.cmd

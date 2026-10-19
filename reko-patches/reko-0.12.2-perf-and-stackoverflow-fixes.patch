@@ -1,0 +1,240 @@
+diff --git a/src/Core/Types/TypeStore.cs b/src/Core/Types/TypeStore.cs
+index a1ecb69..6d5624f 100644
+--- a/src/Core/Types/TypeStore.cs
++++ b/src/Core/Types/TypeStore.cs
+@@ -122,7 +122,13 @@ public interface ITypeStore
+     /// </summary>
+     public class TypeStore : ITypeStore
+     {
+-        private readonly SortedList<int, EquivalenceClass> usedClasses;
++        // PERF: was SortedList<int,EquivalenceClass>. MergeClasses does two Removes +
++        // an Add per type-variable unification; on a SortedList each is O(n) (array
++        // shift), making whole-program type analysis O(n^2) in the type-variable count
++        // (hours + tens of GB on a ~6000-function program). A Dictionary makes those
++        // O(1); ordering is only needed when enumerating (UsedEquivalenceClasses),
++        // where we sort once.
++        private readonly Dictionary<int, EquivalenceClass> usedClasses;
+         private readonly Dictionary<TypeVariable, (Address? uAddr, Expression e)> tvSources;
+         private readonly Dictionary<Expression, TypeVariable> mapExprToTypevar;
+ 
+@@ -132,7 +138,7 @@ public class TypeStore : ITypeStore
+         public TypeStore()
+         {
+             TypeVariables = new List<TypeVariable>();
+-            usedClasses = new SortedList<int, EquivalenceClass>();
++            usedClasses = new Dictionary<int, EquivalenceClass>();
+             tvSources = new Dictionary<TypeVariable, (Address?,Expression)>();
+             SegmentTypes = new Dictionary<ImageSegment, StructureType>();
+             this.mapExprToTypevar = new Dictionary<Expression, TypeVariable>();
+@@ -326,7 +332,15 @@ public void CopyClassDataTypesToTypeVariables()
+         /// </summary>
+         public IList<EquivalenceClass> UsedEquivalenceClasses
+         {
+-            get { return usedClasses.Values; }
++            get
++            {
++                // usedClasses is an unordered Dictionary (O(1) merge); produce a
++                // deterministic, by-class-number ordering here, matching the old
++                // SortedList<int,...> enumeration order.
++                var list = new List<EquivalenceClass>(usedClasses.Values);
++                list.Sort((a, b) => a.Number.CompareTo(b.Number));
++                return list;
++            }
+         }
+ 
+         /// <inheritdoc/>
+diff --git a/src/Decompiler/Typing/ComplexExpressionBuilder.cs b/src/Decompiler/Typing/ComplexExpressionBuilder.cs
+index 7ae44dd..64ae40b 100644
+--- a/src/Decompiler/Typing/ComplexExpressionBuilder.cs
++++ b/src/Decompiler/Typing/ComplexExpressionBuilder.cs
+@@ -60,6 +60,13 @@ public class ComplexExpressionBuilder : IDataTypeVisitor<Expression>
+         private DataType? dtResult;         // DataType of resulting expression. Defined if expComplex was dereferenced (Mem0[expComplex])
+         private bool dereferenceGenerated;  // True if a dereferencing expression has been emitted (field access or the like.
+         private int depth;
++        // Cycle guard for the Union<->EquivalenceClass descent. The shared whole-
++        // program merged type graph can contain cyclic union/eq-class chains; those
++        // two Visit methods have no cycle protection (unlike VisitStructure's depth
++        // cap), so a cycle recurses until the .NET stack overflows (uncatchable,
++        // kills the process). This bounds that descent. Reset per BuildComplex.
++        private int unionDepth;
++        private const int MaxUnionDepth = 200;
+ 
+         /// <summary>
+         /// Constructs a complex expression builder.
+@@ -100,6 +107,7 @@ public ComplexExpressionBuilder(
+         public Expression BuildComplex(DataType? dtResult)
+         {
+             depth = 0; //$DEBUG;
++            unionDepth = 0;
+             this.enclosingPtr = null;
+             if (store.TryGetTypeVariable(expComplex!, out var tvComplex))
+             {
+@@ -210,8 +218,15 @@ public Expression VisitEnum(EnumType e)
+         /// <inheritdoc/>
+         public Expression VisitEquivalenceClass(EquivalenceClass eq)
+         {
++            if (++unionDepth > MaxUnionDepth)
++            {
++                --unionDepth;
++                return FallbackExpression();
++            }
+             this.dtComplex = eq.DataType;
+-            return this.dtComplex.Accept(this);
++            var e = this.dtComplex.Accept(this);
++            --unionDepth;
++            return e;
+         }
+ 
+         /// <inheritdoc/>
+@@ -372,6 +387,11 @@ public Expression VisitTypeVariable(TypeVariable tv)
+         /// <inheritdoc/>
+         public Expression VisitUnion(UnionType ut)
+         {
++            if (++unionDepth > MaxUnionDepth)
++            {
++                --unionDepth;
++                return FallbackExpression();
++            }
+             UnionAlternative? alt = ut.FindAlternative(dtComplexOrig!);
+             if (alt is null)
+             {
+@@ -381,6 +401,7 @@ public Expression VisitUnion(UnionType ut)
+             if (alt is null)
+             {
+                 Debug.Print("Unable to find {0} in {1} (Offset {2}).", dtComplexOrig, ut, offset);          //$diagnostic service
++                --unionDepth;
+                 return FallbackExpression();
+             }
+ 
+@@ -394,7 +415,9 @@ public Expression VisitUnion(UnionType ut)
+             {
+                 expComplex = CreateFieldAccess(ut, alt.DataType, expComplex!, alt);
+             }
+-            return dtComplex.Accept(this);
++            var e = dtComplex.Accept(this);
++            --unionDepth;
++            return e;
+         }
+ 
+         /// <inheritdoc/>
+diff --git a/src/Decompiler/Typing/TypedExpressionRewriter.cs b/src/Decompiler/Typing/TypedExpressionRewriter.cs
+index 65c7c5c..1be8fab 100644
+--- a/src/Decompiler/Typing/TypedExpressionRewriter.cs
++++ b/src/Decompiler/Typing/TypedExpressionRewriter.cs
+@@ -81,9 +81,15 @@ public void RewriteProgram(Program program)
+         {
+             int cProc = program.Procedures.Count;
+             int i = 0;
++            // Explicit, newline-terminated progress to stderr so the codegen phase
++            // (the slowest, per-procedure expression rewrite) is visible in logs
++            // even when the interactive \r-spinner is captured to a file.
++            System.Console.Error.WriteLine($"[TypedExprRewriter] rewriting {cProc} procedures...");
+             foreach (Procedure proc in program.Procedures.Values)
+             {
+                 eventListener.Progress.ShowProgress("Rewriting expressions.", i++, cProc);
++                if (i % 500 == 0)
++                    System.Console.Error.WriteLine($"[TypedExprRewriter] {i}/{cProc} procedures rewritten");
+                 RewriteFormals(proc.Signature);
+                 foreach (Statement stm in proc.Statements)
+                 {
+diff --git a/src/Decompiler/Typing/UnionAlternativeChooser.cs b/src/Decompiler/Typing/UnionAlternativeChooser.cs
+index 40c0b21..21739c8 100644
+--- a/src/Decompiler/Typing/UnionAlternativeChooser.cs
++++ b/src/Decompiler/Typing/UnionAlternativeChooser.cs
+@@ -36,6 +36,43 @@ public class UnionAlternativeChooser : IDataTypeVisitor<bool>
+         private readonly DataType? dtResult;
+         private readonly Unifier unifier;
+ 
++        // --- PERF (added) ---------------------------------------------------
++        // On whole-program runs, unification yields one giant, deeply-nested
++        // merged type graph. Choose() is called per union-typed expression and
++        // re-walks that graph each time (deep recursion + a huge visitedTypes
++        // set), which dominates codegen and effectively hangs.
++        //
++        // MaxTypesPerQuery bounds how many distinct types one query may explore;
++        // beyond it the query gives up (returns null = "no alternative", a result
++        // the callers already handle), so a degenerate graph can't stall the run.
++        // The memo caches results: during the rewrite phase the type graph is
++        // immutable, so Choose is a pure function of its arguments.
++        private const int MaxTypesPerQuery = 4000;
++        private static readonly System.Collections.Concurrent.ConcurrentDictionary<ChooseKey, UnionAlternative?> memo =
++            new(new ChooseKeyComparer());
++        private static long nCalls, nHits, nCapped;
++
++        private readonly struct ChooseKey
++        {
++            public readonly DataType Ut; public readonly DataType? Dt;
++            public readonly bool Ptr; public readonly int Off;
++            public ChooseKey(DataType ut, DataType? dt, bool ptr, int off)
++            { Ut = ut; Dt = dt; Ptr = ptr; Off = off; }
++        }
++        private sealed class ChooseKeyComparer : IEqualityComparer<ChooseKey>
++        {
++            public bool Equals(ChooseKey a, ChooseKey b) =>
++                ReferenceEquals(a.Ut, b.Ut) && ReferenceEquals(a.Dt, b.Dt) &&
++                a.Ptr == b.Ptr && a.Off == b.Off;
++            public int GetHashCode(ChooseKey k)
++            {
++                int h = System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(k.Ut);
++                if (k.Dt is not null)
++                    h = h * 31 + System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(k.Dt);
++                return (h * 31 + (k.Ptr ? 1 : 0)) * 31 + k.Off;
++            }
++        }
++
+         private UnionAlternativeChooser(
+             DataType? dtResult, int offset, bool isEnclosingPtr,
+             HashSet<DataType> visitedTypes)
+@@ -62,8 +99,27 @@ private UnionAlternativeChooser(
+             bool isEnclosingPtr,
+             int offset)
+         {
+-            return Choose(
++            var key = new ChooseKey(ut, dtResult, isEnclosingPtr, offset);
++            if (memo.TryGetValue(key, out var cached))
++            {
++                System.Threading.Interlocked.Increment(ref nHits);
++                return cached;
++            }
++            var result = Choose(
+                 ut, dtResult, isEnclosingPtr, offset, new HashSet<DataType>());
++            memo[key] = result;
++            var n = System.Threading.Interlocked.Increment(ref nCalls);
++            if (n % 50000 == 0)
++                System.Console.Error.WriteLine(
++                    $"[UnionAltChooser] calls={n} cacheHits={nHits} cappedQueries={nCapped} memoSize={memo.Count}");
++            return result;
++        }
++
++        /// <summary>Reset the cross-program memo/counters (call between programs).</summary>
++        public static void ResetCache()
++        {
++            memo.Clear();
++            nCalls = nHits = nCapped = 0;
+         }
+ 
+         /// <inheritdoc/>
+@@ -141,6 +197,11 @@ public bool VisitStructure(StructureType str)
+             if (visitedTypes.Contains(str))
+                 return false;
+             visitedTypes.Add(str);
++            if (visitedTypes.Count > MaxTypesPerQuery)
++            {
++                System.Threading.Interlocked.Increment(ref nCapped);
++                return false;
++            }
+             if (!this.isEnclosingPtr)
+                 return false;
+             var field = str.Fields.LowerBound(this.offset);
+@@ -167,6 +228,11 @@ public bool VisitUnion(UnionType ut)
+         {
+             if (!visitedTypes.Add(ut))
+                 return false;
++            if (visitedTypes.Count > MaxTypesPerQuery)
++            {
++                System.Threading.Interlocked.Increment(ref nCapped);
++                return false;
++            }
+             return Choose(ut) is not null;
+         }
+ 

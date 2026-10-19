@@ -1,0 +1,2 @@
+# Keep the Reko patches byte-exact (they were checked with git apply as stored).
+*.patch -text
