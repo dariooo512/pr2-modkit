@@ -22,7 +22,8 @@ typedef void (__attribute__((thiscall)) *AddGold_t)(void *counter, int amount, i
 
 static uint8_t *human(void)
 {
-    if (!PLR_BASE || !HUMAN_H) return NULL;               /* no game running */
+    if (!PLR_BASE || !HUMAN_H || (HUMAN_H & 0xFFFF) == 0xFFFF)
+        return NULL;                          /* no game, or no player yet (New Game pre-simulation) */
     return PLR_BASE + P_STRIDE * (HUMAN_H & 0xFFFF);
 }
 
