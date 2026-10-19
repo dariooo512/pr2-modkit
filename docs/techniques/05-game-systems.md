@@ -25,7 +25,7 @@ A handle is `index (16 bits) | type (5 bits) | serial (11 bits)`. Types: 1 town,
 | Pool | Base | Element | Resolver |
 |---|---|---|---|
 | Towns | `0x702068` (pointer array; links `0x70206C`, cap `0x702070`, head `0x702074`) | `CStadt*` | `0x5C2200`; safe lookup `0x41F620` (`ecx = 0x702068`, NULL if invalid) |
-| Players | `0x701EC0` | inline, stride `0x94` | `0x5C29E0`; human player's handle at `0x701ED0` |
+| Players | `0x701EC0` | inline, stride `0x94` | `0x5C29E0`; human player's handle at `0x701ED0`, `0x0009FFFF` (index `0xFFFF`) while there is no player, e.g. during a New Game's pre-simulation |
 | Convoys | `0x701EE8` | pointer | `0x5C2360` |
 | Ships | `0x703CD4` (count `0x703CDC`) | inline, stride `0x28` | |
 

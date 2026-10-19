@@ -3,7 +3,13 @@
  * addresses from its research/economy_data.md, all for the 1.1.2.3 image:
  *
  *   0x00701EC0  CPlayer pool base (inline array, stride 0x94)          [static]
- *   0x00701ED0  handle of the human player (low 16 bits = pool index)  [static]
+ *   0x00701EC4  the pool's slot table, u32 per slot, generation tag in the high word [static]
+ *   0x00701EC8  the pool's capacity, u16, at most 0xFFFE              [static]
+ *   0x00701ED0  handle of the human player: bits 0..15 pool index, 16..20 type (9),
+ *               21..31 generation. 0x0009FFFF (index 0xFFFF) = no player: from start-up,
+ *               through a New Game's pre-simulation (about 90 game days, run before the
+ *               player is created) and after the player is destroyed     [static]
+ *   CPlayer+0x25  alive flag, u8                                        [static]
  *   CPlayer+0x3C  gold, int32                                          [static]
  *   0x0060E570  void __thiscall Counter_Add(Counter *gold, int amount, int ledgerCat), ret 8 [static]
  *               clamps to +-2,000,000,000 and books the amount in the balance-sheet
@@ -14,17 +20,27 @@
 #include "mod.h"
 
 #define PLR_BASE  (*(uint8_t **)0x00701EC0)
+#define PLR_SLOTS (*(uint8_t **)0x00701EC4)
+#define PLR_CAP   (*(uint16_t *)0x00701EC8)
 #define HUMAN_H   (*(uint32_t *)0x00701ED0)
-enum { P_GOLD = 0x3C, P_STRIDE = 0x94, LEDGER_SCRIPTS = 9 };
+enum { P_ALIVE = 0x25, P_GOLD = 0x3C, P_STRIDE = 0x94, LEDGER_SCRIPTS = 9 };
 
 typedef void (__attribute__((thiscall)) *AddGold_t)(void *counter, int amount, int cat);
 #define PR2_AddGold ((AddGold_t)0x0060E570)
 
+/* The human player's CPlayer, or NULL while there is none (main menu, New Game pre-simulation).
+ * The same tests as the game's own handle lookup 0x5C29E0, without its C++ throw: a player
+ * handle, an index below the pool's capacity (0xFFFF never is), the slot's generation, alive. */
 static uint8_t *human(void)
 {
-    if (!PLR_BASE || !HUMAN_H || (HUMAN_H & 0xFFFF) == 0xFFFF)
-        return NULL;                          /* no game, or no player yet (New Game pre-simulation) */
-    return PLR_BASE + P_STRIDE * (HUMAN_H & 0xFFFF);
+    uint8_t *base = PLR_BASE, *slots = PLR_SLOTS;
+    uint32_t h = HUMAN_H, i = h & 0xFFFF;
+    if (!base || !slots || !h || i == 0xFFFF || ((h >> 16) & 0x1F) != 9 || i >= PLR_CAP)
+        return NULL;                                       /* no game, or no player yet */
+    if (((h >> 21) ^ *(uint16_t *)(slots + 4 * i + 2)) & 0x7FF)
+        return NULL;                                       /* a stale handle */
+    uint8_t *p = base + P_STRIDE * i;
+    return p[P_ALIVE] ? p : NULL;
 }
 
 int64_t mod_player_gold(void)

@@ -63,7 +63,9 @@ convoys, permits and the UI.
 
 Rules (all from experience, `techniques/08-debugging.md`): never raise a Lua error or let
 a C++ exception out of a Lua function; touch game objects only from the frame hook;
-check pointers (`human()` returns NULL in the main menu).
+check pointers (`human()` returns NULL in the main menu, and for about 90 game days after
+a New Game starts: the game pre-simulates the world before it creates the player, and the
+handle at `0x701ED0` is `0x0009FFFF` then, index `0xFFFF` = no player).
 
 ## 4. Build
 
