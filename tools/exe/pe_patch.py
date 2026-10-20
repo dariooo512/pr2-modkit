@@ -501,13 +501,32 @@ def manifest_path(out_path: Path | str) -> Path:
     return p.with_name(p.name + ".manifest.json")
 
 
+def _git_root(p: Path):
+    for d in [p, *p.parents]:
+        if (d / ".git").exists():
+            return d
+    return None
+
+
 def _guard_out_path(out_path: Path, base_path: Path):
-    """Never overwrite the base exe, and never write a patched exe into a Steam library."""
+    """Never overwrite the base exe, never write a patched exe into a Steam library, and never
+    into a git checkout except under a build folder (PR2_BUILD or a `_build` folder), so a game
+    exe cannot end up in a commit."""
     if out_path == Path(base_path).resolve():
         raise PatchError(f"refusing to overwrite the base exe {out_path}")
     if any(part.lower() == "steamapps" for part in out_path.parts):
         raise PatchError(f"refusing to write {out_path}: inside a Steam library; "
                          "build into a folder of your own and deploy to a test install")
+    root = _git_root(out_path.parent)
+    if root is not None:
+        try:
+            out_path.relative_to(Path(BUILD_DIR).resolve())
+            return
+        except ValueError:
+            pass
+        if "_build" not in out_path.relative_to(root).parts[:-1]:
+            raise PatchError(f"refusing to write {out_path}: inside the git checkout {root} but not under "
+                             f"a build folder ({BUILD_DIR} or a _build folder)")
 
 
 PatchFn = Callable[[PatchBuilder], None]

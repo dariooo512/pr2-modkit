@@ -1,12 +1,16 @@
 # Mute the test game's audio (the Windows volume mixer's per-app mute) from outside the game.
 #   powershell -ExecutionPolicy Bypass -File tools/test/mute_game.ps1 [-Watch [-IdleMinutes N]] [-Pattern "PR2_*"]
+#   powershell -ExecutionPolicy Bypass -File tools/test/mute_game.ps1 -Watch -Names PR2_mymod,PR2_target
 # Mutes every audio session whose process name matches -Pattern (default PR2_*: the test install's
-# exes such as PR2_target.exe; the Steam PR2.exe does not match and is never touched). -Watch keeps
-# doing it every 3 s, so games started later are muted too; with -IdleMinutes it stops after that
-# long without a matching game running (tools/test/session.py starts it that way).
-param([switch]$Watch, [int]$IdleMinutes = 0, [string]$Pattern = "PR2_*")
+# exes such as PR2_target.exe; the Steam PR2.exe does not match and is never touched). -Names gives
+# exact process names instead (without .exe); only a name given there explicitly can be PR2, for a
+# test that has to start the game through Steam. -Watch keeps doing it every 3 s, so games started
+# later are muted too; with -IdleMinutes it stops after that long without a matching game running
+# (tools/test/session.py starts it that way).
+param([switch]$Watch, [int]$IdleMinutes = 0, [string]$Pattern = "PR2_*", [string[]]$Names = @())
 
-if ($Pattern -ieq "PR2") { throw "refusing to match the Steam PR2.exe" }
+if ($Pattern -ieq "PR2") { throw "refusing to match the Steam PR2.exe by pattern (name it in -Names to mean it)" }
+$explicit = $Names.Count -gt 0
 
 Add-Type -Language CSharp @"
 using System;
@@ -45,7 +49,7 @@ interface ISimpleAudioVolume {
     int SetMute(bool m, IntPtr c); int GetMute(out bool m);
 }
 public static class GameMute {
-    public static int Run(string[] names) {
+    public static int Run(string[] names, bool explicitNames) {
         var en = (IMMDeviceEnumerator)new MMDeviceEnumerator();
         IMMDevice dev; en.GetDefaultAudioEndpoint(0, 1, out dev);
         Guid iid = typeof(IAudioSessionManager2).GUID; object o;
@@ -56,7 +60,8 @@ public static class GameMute {
             IAudioSessionControl2 c; se.GetSession(i, out c); uint pid; c.GetProcessId(out pid);
             string name = "";
             try { name = Process.GetProcessById((int)pid).ProcessName; } catch { continue; }
-            if (Array.IndexOf(names, name) < 0 || name.Equals("PR2", StringComparison.OrdinalIgnoreCase)) continue;
+            if (Array.IndexOf(names, name) < 0) continue;
+            if (!explicitNames && name.Equals("PR2", StringComparison.OrdinalIgnoreCase)) continue;
             var v = (ISimpleAudioVolume)c; bool m; v.GetMute(out m);
             if (!m) { v.SetMute(true, IntPtr.Zero); muted++; }
         }
@@ -67,11 +72,16 @@ public static class GameMute {
 
 $seen = Get-Date
 do {
-    $names = @(Get-Process | Where-Object { $_.ProcessName -like $Pattern -and $_.ProcessName -ne "PR2" } |
-               ForEach-Object { $_.ProcessName } | Sort-Object -Unique)
+    if ($explicit) {
+        $names = @(Get-Process -Name $Names -ErrorAction SilentlyContinue | ForEach-Object { $_.ProcessName } |
+                   Sort-Object -Unique)
+    } else {
+        $names = @(Get-Process | Where-Object { $_.ProcessName -like $Pattern -and $_.ProcessName -ne "PR2" } |
+                   ForEach-Object { $_.ProcessName } | Sort-Object -Unique)
+    }
     $n = 0
     if ($names.Count -gt 0) {
-        try { $n = [GameMute]::Run([string[]]$names) } catch { $n = 0 }   # no audio device: try again later
+        try { $n = [GameMute]::Run([string[]]$names, $explicit) } catch { $n = 0 }   # no audio device: try again later
         $seen = Get-Date
     }
     if ($n -gt 0) { "muted $n session(s) at $(Get-Date -Format HH:mm:ss)" }

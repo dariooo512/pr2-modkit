@@ -6,6 +6,8 @@
  *   saves all registers + flags, calls handler(Regs*), restores them
  *   (so the handler may change registers), re-runs the displaced
  *   instructions (must be position-independent) and jumps back.
+ * If another mod's hook is already there (a 5-byte jmp where `expect`
+ * starts), the hook chains behind it: its handler runs, then that jmp.
  */
 #ifndef PR2N_HOOK_H
 #define PR2N_HOOK_H
@@ -18,7 +20,7 @@ typedef struct Regs {           /* layout of PUSHFD over PUSHAD */
 
 typedef void (*HookFn)(Regs *r);
 
-/* Returns 1 on success, 0 if the bytes at `at` differ from `expect`. */
+/* Returns 1 on success (also chained), 0 if the bytes at `at` differ from `expect`. */
 int hook_install(const char *name, uint32_t at, const uint8_t *expect, int len, HookFn fn);
 
 /* Like hook_install, for a hook at a function entry: when fn returns nonzero

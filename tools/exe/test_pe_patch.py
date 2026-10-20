@@ -197,6 +197,13 @@ class PePatchTest(unittest.TestCase):
         with self.assertRaisesRegex(PatchError, "overwrite the base"):
             b.build(pe_patch.BASE_EXE)
 
+    def test_rejects_out_path_in_a_checkout(self):
+        b = PatchBuilder()
+        target = Path(__file__).resolve().parent / "nope.exe"      # the kit's own tools/exe/
+        with self.assertRaisesRegex(PatchError, "git checkout"):
+            b.build(target)
+        self.assertFalse(target.exists())
+
     def test_rejects_steam_library(self):
         b = PatchBuilder()
         target = OUT_DIR / "steamapps" / "common" / "Port Royale 2" / "PR2.exe"

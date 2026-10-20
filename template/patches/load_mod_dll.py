@@ -16,11 +16,13 @@ LoadLibraryA's result is ignored: without the DLL the game starts unmodded.
 Only for a modder's own analysis/test copy of the game. It needs the DRM-free
 image (the 1.1.2.3 exe after SteamStub is removed), because pe_patch.py checks
 that base's SHA-256. Players never get a patched exe: their Steam copy gets the
-same patch applied in memory by a loader (docs/techniques/03-the-exe.md section 6).
+kit's loader (loader/README.md), which loads the DLL itself, so this module is
+NOT in install.json's "patches" (the loader route needs no exe patch for it).
 
 Conflict: this detours the same 5 bytes as P06, so it cannot be combined with
-Sovereign Nations' patch set as is (pe_patch.py refuses overlapping patches).
-To load two DLLs, change the prologue to push/call twice.
+Sovereign Nations' patch set as is (pe_patch.py refuses overlapping patches,
+and the loader refuses a second patch file that changes the same bytes).
+To load two DLLs from a test exe, change the prologue to push/call twice.
 
 Use (from the kit's folder):
     python tools/exe/pe_patch.py <out dir>/PR2_hello.exe \

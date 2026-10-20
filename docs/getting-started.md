@@ -121,7 +121,7 @@ python tools\files\screen_dump.py verify
 python tools\files\cpr_pack.py _game\extracted\arcs --like _game\original\pr2_arcs.cpr --check
 ```
 
-Expected: `Ran 17 tests ... OK`; `5/5 facts hold`; `round-trip byte-identical: 254 / 254 files
+Expected: `Ran 18 tests ... OK`; `5/5 facts hold`; `round-trip byte-identical: 254 / 254 files
 (4326 controls); failures: 0`; `IDENTICAL to ...pr2_arcs.cpr`. All checked. They prove your exe
 and data are the ones these docs describe, and that the file tools read and write them
 correctly. (`cpr_pack.py --check` was also run on `loca`, `arct` and `arcd`: identical.)
@@ -145,7 +145,7 @@ python tools\test\env.py setup
 python tools\test\env.py backup-saves
 python tools\test\env.py windowed on
 python tools\test\env.py fast-boot on
-python tools\test\env.py dpi-aware on        (only on a scaled HiDPI screen)
+python tools\test\env.py dpi-aware on        (only on a scaled HiDPI screen; `off` removes it again)
 ```
 
 `setup` copies the pristine copy (step 4) to `%USERPROFILE%\PR2-test-env` (setting

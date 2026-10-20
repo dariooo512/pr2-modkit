@@ -3,23 +3,32 @@
 
     python tools/test/env.py setup                 create it from the pristine copy (or verify it)
     python tools/test/env.py status                CLEAN, or what differs from the pristine copy
-    python tools/test/env.py deploy FILE... [--to SUBDIR]   copy your build into it (recorded)
+    python tools/test/env.py deploy FILE... [--to SUBDIR] [--name NAME]   copy your build into it (recorded)
     python tools/test/env.py undeploy              remove what deploy added, restore what it replaced
     python tools/test/env.py backup-saves          snapshot the Save folder and the Run folder
     python tools/test/env.py restore-saves [DIR]   put a snapshot back (default: the newest)
-    python tools/test/env.py windowed on|off       FULLSCREEN in settings.cfg
+    python tools/test/env.py windowed on|off       FULLSCREEN in settings.cfg (the first change keeps the original)
     python tools/test/env.py fast-boot on|off      park / restore the intro videos
-    python tools/test/env.py dpi-aware on|off      no 2x window scaling on HiDPI screens (test exes only)
+    python tools/test/env.py dpi-aware on|off|list no 2x window scaling on HiDPI screens (test exes only)
 
 Settings (tools/kit_paths.py): PR2_PRISTINE (an unmodified copy of the game folder, made right
 after installing from Steam), PR2_BASE_EXE (the DRM-free exe of your own copy; `setup` puts it
 in the test install as PR2_target.exe), PR2_TEST_ENV (where the test install lives, default
-%USERPROFILE%\\PR2-test-env), PR2_SAVE_DIR, PR2_BUILD (backups go to PR2_BUILD\\backup).
+%USERPROFILE%\\PR2-test-env), PR2_SAVE_DIR, PR2_BACKUP_DIR (default PR2_BUILD\\backup).
 
 The game always writes saves and settings.cfg to your Documents folder, which the test install
 SHARES with your Steam install: back them up before every experiment (backup-saves) and put
-them back afterwards (restore-saves). Take the test lock (testlock.py) if anything else may use
-the same test install.
+them back afterwards (restore-saves). `windowed on` keeps the original settings.cfg as
+PR2_BACKUP_DIR\\settings.cfg.orig before its first change (restore_settings() puts it back).
+Take the test lock (testlock.py) if anything else may use the same test install.
+
+dpi-aware: `on` writes Windows' HIGHDPIAWARE compatibility flag (HKCU\\...\\AppCompatFlags\\Layers,
+value "~ HIGHDPIAWARE") for the test exes and records each entry it added in a small state file
+(%LOCALAPPDATA%\\pr2-modkit\\dpi_flags.json). `off` removes exactly those entries again (putting back
+a value that was there before), and also leftover "~ HIGHDPIAWARE" entries of the tools' own test
+exe names (PR2_target.exe and every exe deploy put in) whose file no longer exists, e.g. of a
+deleted test install. Entries of other programs are never touched. session.py sets the flag for
+the start of the game and removes it once the game runs (the flag is read when a process starts).
 """
 import argparse
 import hashlib
@@ -47,9 +56,14 @@ PARKED = ENV / "_parked"                  # files moved aside by fast-boot
 SAVE_DIR = kit_paths.SAVE_DIR
 RUN_DIR = Path(os.environ.get("APPDATA", str(Path.home()))) / "Ascaron Entertainment" / "Port Royale 2" / "Run"
 BUILD = kit_paths.BUILD
-BACKUPS = BUILD / "backup"
+BACKUPS = kit_paths.BACKUP_DIR
 INTRO_VIDEOS = ["Videos/ascaron.wmv", "Videos/nvidia.wmv", "Videos/intro.wmv"]
-OWN = {ENV_EXE.name, DEPLOYED.name}
+OWN = {ENV_EXE.name, DEPLOYED.name}       # files of the tools, not drift (a mod may add its log's name)
+
+LAYERS = r"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers"
+DPI_FLAG = "~ HIGHDPIAWARE"               # exactly what dpi-aware on writes
+DPI_STATE = Path(os.environ.get("LOCALAPPDATA") or str(Path.home())) / "pr2-modkit" / "dpi_flags.json"
+TOOL_EXES = {ENV_EXE.name.lower()}        # test-exe names the tools use (a mod adds its own)
 
 
 def sha256(p):
@@ -125,13 +139,19 @@ def status():
     return clean
 
 
-def deploy(files, to=""):
+def deploy(files, to="", name=None):
+    """Copy files into the test install (into SUBDIR `to`; one file may get another `name`) and
+    record them. A file of the game that gets replaced is kept and put back by undeploy; a file
+    that is not part of the pristine copy (an earlier build) is simply overwritten."""
+    files = list(files)
+    if name and len(files) != 1:
+        raise SystemExit("deploy --name takes exactly one file")
     rec = deployed()
     known = {f["path"] for f in rec["files"]}
     for src in map(Path, files):
-        rel = (Path(to) / src.name).as_posix()
+        rel = (Path(to) / (name or src.name)).as_posix()
         dst = ENV / rel
-        if rel not in known and dst.exists():          # keep the file we replace
+        if rel not in known and dst.exists() and (PRISTINE / rel).exists():   # keep the game's file
             bak = DEPLOY_BACKUP / rel
             bak.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(dst, bak)
@@ -148,6 +168,8 @@ def undeploy():
     rec = deployed()
     for f in reversed(rec["files"]):
         dst, bak = ENV / f["path"], DEPLOY_BACKUP / f["path"]
+        if dst.suffix.lower() == ".exe":
+            dpi_clear(dst)
         if f.get("replaced") and bak.exists():
             shutil.copy2(bak, dst)
             bak.unlink()
@@ -155,7 +177,6 @@ def undeploy():
         elif dst.exists():
             dst.unlink()
             print(f"removed  {dst}")
-        dpi_aware_one(dst, False)
     DEPLOYED.unlink(missing_ok=True)
     if DEPLOY_BACKUP.exists() and not any(DEPLOY_BACKUP.rglob("*.*")):
         shutil.rmtree(DEPLOY_BACKUP)
@@ -163,7 +184,8 @@ def undeploy():
 
 # --- settings shared with the Steam install -----------------------------------------------
 def backup_saves():
-    """The Save folder (saves and settings.cfg) and the Run folder (the player's logo files)."""
+    """The Save folder (saves and settings.cfg) and the Run folder (the player's logo files):
+    PR2_BACKUP_DIR/saves-<time>/Save and .../Run."""
     dest = BACKUPS / time.strftime("saves-%Y%m%d-%H%M%S")
     shutil.copytree(SAVE_DIR, dest / "Save")
     if RUN_DIR.exists():
@@ -190,6 +212,13 @@ def _restore_tree(src: Path, live: Path, aside: Path):
             shutil.copy2(a, b)
 
 
+def _layout(backup: Path):
+    """(Save copy, Run copy) of a snapshot; also reads the older flat layout (saves + _run/)."""
+    if (backup / "Save").is_dir():
+        return backup / "Save", backup / "Run"
+    return backup, backup / "_run"
+
+
 def restore_saves(backup=None):
     if backup is None:
         snaps = sorted(BACKUPS.glob("saves-*"))
@@ -197,18 +226,43 @@ def restore_saves(backup=None):
             sys.exit(f"no backups in {BACKUPS}")
         backup = snaps[-1]
     backup = Path(backup)
+    save, run = _layout(backup)
     aside = BACKUPS / time.strftime("aside-%Y%m%d-%H%M%S")
-    _restore_tree(backup / "Save", SAVE_DIR, aside / "Save")
-    _restore_tree(backup / "Run", RUN_DIR, aside / "Run")
+    _restore_tree(save, SAVE_DIR, aside / "Save")
+    _restore_tree(run, RUN_DIR, aside / "Run")
     print(f"saves restored from {backup}" + (f"; new files kept in {aside}" if aside.exists() else ""))
 
 
+def restore_run(backup):
+    """Only the Run folder (the player's logo files) back from a snapshot; files that appeared
+    there since are moved aside."""
+    _, run = _layout(Path(backup))
+    _restore_tree(run, RUN_DIR, BACKUPS / time.strftime("aside-%Y%m%d-%H%M%S") / "Run")
+
+
+SETTINGS_ORIG = BACKUPS / "settings.cfg.orig"
+
+
 def windowed(on):
+    """FULLSCREEN in settings.cfg. The first change keeps the original as settings.cfg.orig; an
+    orig from an earlier run that did not restore it is kept while the file is still windowed,
+    so it is never replaced by the test settings."""
     cfg = SAVE_DIR / "settings.cfg"
-    lines = cfg.read_text().splitlines()
+    text = cfg.read_text()
+    if not SETTINGS_ORIG.exists() or "FULLSCREEN : 0" not in text:
+        SETTINGS_ORIG.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(cfg, SETTINGS_ORIG)
+    lines = text.splitlines()
     lines = [f"FULLSCREEN : {0 if on else 1}" if l.startswith("FULLSCREEN") else l for l in lines]
     cfg.write_text("\n".join(lines) + "\n")
     print(f"{cfg}: FULLSCREEN = {0 if on else 1}")
+
+
+def restore_settings():
+    """Put back the settings.cfg that windowed() kept."""
+    if SETTINGS_ORIG.exists():
+        shutil.copy2(SETTINGS_ORIG, SAVE_DIR / "settings.cfg")
+        print(f"{SAVE_DIR / 'settings.cfg'} restored")
 
 
 def fast_boot(on):
@@ -222,26 +276,141 @@ def fast_boot(on):
     print(f"fast boot {'on' if on else 'off'} (intro videos {'parked' if on else 'restored'})")
 
 
-def dpi_aware_one(exe: Path, on: bool):
+# --- the HIGHDPIAWARE flag ------------------------------------------------------------------
+def _dpi_state():
+    try:
+        s = json.loads(DPI_STATE.read_text())
+    except (OSError, ValueError):
+        s = {}
+    return {"added": s.get("added", {}), "names": s.get("names", [])}
+
+
+def _dpi_save(s):
+    DPI_STATE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = DPI_STATE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(s, indent=1))
+    os.replace(tmp, DPI_STATE)
+
+
+def _layers():
     import winreg
-    key = winreg.CreateKey(winreg.HKEY_CURRENT_USER,
-                           r"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers")
-    if on:
-        winreg.SetValueEx(key, str(exe), 0, winreg.REG_SZ, "~ HIGHDPIAWARE")
-    else:
+    return winreg.CreateKey(winreg.HKEY_CURRENT_USER, LAYERS)
+
+
+def _get(key, name):
+    import winreg
+    try:
+        return winreg.QueryValueEx(key, name)[0]
+    except FileNotFoundError:
+        return None
+
+
+def _key(p) -> str:
+    return os.path.normcase(str(p))
+
+
+def dpi_set(exe: Path):
+    """Set the flag for one exe and record it. An entry with exactly our value that is already
+    there for an exe of the test install or one of the tools' own test-exe names is taken over
+    (earlier tools added it unrecorded);
+    any other value is kept in the record and put back by dpi_clear()."""
+    import winreg
+    s = _dpi_state()
+    k, name = _layers(), str(exe)
+    cur = _get(k, name)
+    if _key(name) not in s["added"]:
+        in_env = _key(exe).startswith(_key(ENV) + os.sep)
+        if cur == DPI_FLAG and not in_env and exe.name.lower() not in _tool_exes(s):
+            return                                       # somebody else's entry with our value
+        s["added"][_key(name)] = {"path": name, "previous": None if cur == DPI_FLAG else cur}
+    if exe.name.lower() not in s["names"]:
+        s["names"].append(exe.name.lower())
+    if cur != DPI_FLAG:
+        winreg.SetValueEx(k, name, 0, winreg.REG_SZ, DPI_FLAG)
+    _dpi_save(s)
+
+
+def dpi_clear(exe: Path) -> bool:
+    """Remove the entry dpi_set() added for this exe (put back what was there before). Returns
+    whether it changed the registry. An entry that is not in the record is left alone."""
+    import winreg
+    s = _dpi_state()
+    rec = s["added"].pop(_key(exe), None)
+    if rec is None:
+        return False
+    k, changed = _layers(), False
+    if _get(k, rec["path"]) == DPI_FLAG:                 # still ours (nobody changed it since)
+        if rec["previous"] is None:
+            winreg.DeleteValue(k, rec["path"])
+        else:
+            winreg.SetValueEx(k, rec["path"], 0, winreg.REG_SZ, rec["previous"])
+        changed = True
+    _dpi_save(s)
+    return changed
+
+
+def _tool_exes(s=None):
+    s = s or _dpi_state()
+    return TOOL_EXES | {f["path"].rsplit("/", 1)[-1].lower() for f in deployed()["files"]
+                        if f["path"].lower().endswith(".exe")} | set(s["names"])
+
+
+def dpi_entries():
+    """Every Layers value: (path, data)."""
+    import winreg
+    k, out, i = _layers(), [], 0
+    while True:
         try:
-            winreg.DeleteValue(key, str(exe))
-        except FileNotFoundError:
-            pass
+            name, data, _ = winreg.EnumValue(k, i)
+        except OSError:
+            return out
+        out.append((name, data))
+        i += 1
 
 
-def dpi_aware(on):
-    """Windows compatibility flag for the test exes only: without it, a 200%-scaled display
-    doubles the (DPI-unaware) game window to fill the whole screen."""
+def dpi_cleanup(all_installs=False):
+    """Remove what the tools added: the recorded entries of this test install's exes (with
+    all_installs, of every install), recorded entries whose exe no longer exists, and unrecorded
+    "~ HIGHDPIAWARE" leftovers of the tools' own test-exe names whose exe no longer exists."""
+    import winreg
+    removed = []
+    s = _dpi_state()
+    env = _key(ENV) + os.sep
+    for kk, rec in list(s["added"].items()):
+        mine = kk.startswith(env)
+        if all_installs or mine or not Path(rec["path"]).exists():
+            if dpi_clear(Path(rec["path"])):
+                removed.append(rec["path"])
+    names = _tool_exes()
+    k = _layers()
+    for name, data in dpi_entries():
+        if data == DPI_FLAG and Path(name).name.lower() in names and not Path(name).exists():
+            winreg.DeleteValue(k, name)
+            removed.append(name + " (leftover, exe gone)")
+    return removed
+
+
+def dpi_aware(on, also=()):
+    """Windows compatibility flag for the test exes only (and `also`, exes of the test install
+    about to start): without it, a 200%-scaled display doubles the (DPI-unaware) game window to
+    fill the whole screen."""
     exes = test_exes()
-    for exe in exes:
-        dpi_aware_one(exe, on)
-    print(f"HIGHDPIAWARE {'set' if on else 'cleared'} for {[e.name for e in exes]}")
+    exes += [Path(e) for e in also if Path(e).exists() and Path(e) not in exes]
+    if on:
+        for exe in exes:
+            dpi_set(exe)
+        print(f"HIGHDPIAWARE set for {[e.name for e in exes]}")
+    else:
+        removed = dpi_cleanup()
+        print(f"HIGHDPIAWARE removed: {removed or 'nothing the tools added'}")
+
+
+def dpi_list():
+    s = _dpi_state()
+    added = {r["path"] for r in s["added"].values()}
+    for name, data in dpi_entries():
+        if data == DPI_FLAG or name in added:
+            print(f"{'added by the tools' if name in added else 'not recorded':<20} {data!r:<18} {name}")
 
 
 def mute_sound():
@@ -271,10 +440,13 @@ def main(argv=None) -> int:
                                     "windowed", "fast-boot", "dpi-aware"])
     ap.add_argument("args", nargs="*")
     ap.add_argument("--to", default="", help="deploy: subfolder of the test install")
+    ap.add_argument("--name", help="deploy: the file's name in the test install (one file)")
+    ap.add_argument("--all", action="store_true", help="dpi-aware off: the entries added for every test install")
     a = ap.parse_args(argv)
     onoff = a.cmd in ("windowed", "fast-boot", "dpi-aware")
-    if onoff and (len(a.args) != 1 or a.args[0] not in ("on", "off")):
-        ap.error(f"{a.cmd} on|off")
+    allowed = ("on", "off", "list") if a.cmd == "dpi-aware" else ("on", "off")
+    if onoff and (len(a.args) != 1 or a.args[0] not in allowed):
+        ap.error(f"{a.cmd} {'|'.join(allowed)}")
     if a.cmd == "setup":
         return 0 if setup() else 1
     if a.cmd == "status":
@@ -282,7 +454,7 @@ def main(argv=None) -> int:
     if a.cmd == "deploy":
         if not a.args:
             ap.error("deploy FILE...")
-        deploy(a.args, a.to)
+        deploy(a.args, a.to, a.name)
     elif a.cmd == "undeploy":
         undeploy()
     elif a.cmd == "backup-saves":
@@ -293,8 +465,13 @@ def main(argv=None) -> int:
         windowed(a.args[0] == "on")
     elif a.cmd == "fast-boot":
         fast_boot(a.args[0] == "on")
-    elif a.cmd == "dpi-aware":
-        dpi_aware(a.args[0] == "on")
+    elif a.args[0] == "list":
+        dpi_list()
+    elif a.args[0] == "on":
+        dpi_aware(True)
+    else:
+        removed = dpi_cleanup(a.all)
+        print(f"HIGHDPIAWARE removed: {removed or 'nothing the tools added'}")
     return 0
 
 

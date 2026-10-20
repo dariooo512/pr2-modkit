@@ -65,12 +65,14 @@ python tools\exe\pe_patch.py <out dir>\PR2_mod.exe --patch-module <your patch>.p
 python tools\exe\test_pe_patch.py
 ```
 
-The output is for your own test install. `pe_patch.py` refuses to overwrite the base exe and to
-write into a Steam library folder; any other path works. Checked: `test_pe_patch.py` passes
-(17 tests); the template's `load_mod_dll.py` builds and its entry point disassembles as in §4;
-and Sovereign Nations' seven patch modules (from its repository, in order, with
-`--section-name .nation`) build to the same exe, byte for byte, as Sovereign Nations' own copy
-of the builder (`section .nation @ 0x9f7000  22 patch(es), 11 label(s)`). Order matters: P04
+The output is for your own test install. `pe_patch.py` refuses to overwrite the base exe, to
+write into a Steam library folder, and to write into a git checkout anywhere but a build folder
+(`PR2_BUILD` or a folder named `_build`), so a patched game exe cannot end up in a commit.
+Checked: `test_pe_patch.py` passes (18 tests); the template's `load_mod_dll.py` builds and its
+entry point disassembles as in §4; and Sovereign Nations builds its seven patch modules with
+this builder (its `tools/sn_patch.py` only adds `--section-name .nation`): `section .nation @
+0x9f7000  22 patch(es), 11 label(s)`, the same exe byte for byte (sha256 `4387712c...`) as the
+copy of the builder it had before. Order matters: P04
 uses P01's label, and the DLL hard-codes `player_rel` at `0x9F7000`, so **P01 must stay
 first**. Overlapping patches are refused.
 
@@ -166,9 +168,10 @@ logic) runs from there.
 
 Players never get a patched exe. The game folder gets a **loader** and **patch data**, and
 `PR2.exe` stays byte-identical; the game starts from Steam as always and the Steam DRM runs
-untouched. Source: Sovereign Nations' `loader/`, design and test results in its
-`research/user_install.md`. SOLID: verified in game on the
-DRM-free image (3/3); the start through Steam itself is not yet tested.
+untouched. Source: the kit's `loader/` (one `version.dll` for every mod, `loader/README.md`),
+first made for Sovereign Nations (design and first test results in its `research/user_install.md`).
+SOLID: verified in game on the DRM-free image (3/3, and with two mods side by side,
+`techniques/09-releasing-a-mod.md`); the start through Steam itself is not yet tested.
 
 - **The loader is `version.dll`.** `PR2.exe` imports `VERSION.dll` (3 functions) and
   `WINMM.dll`; neither is a KnownDLL, so Windows loads them from the game folder first.
@@ -177,17 +180,20 @@ DRM-free image (3/3); the start through Steam itself is not yet tested.
 - **When it patches.** `DllMain` only swaps the import slot `0x67F6F0`
   (`MSVCR71!__set_app_type`). The CRT calls it right after the entry point (return address
   `0x64E0B6`): SteamStub has decrypted `.text` by then, and no game code has run. At that
-  call the loader checks the original bytes of every patch site and patches nothing on any
-  mismatch (the game then starts unmodded and `PR2Loader.log` says why).
+  call the loader checks the original bytes of every patch site of each mod and patches nothing
+  of a mod on any mismatch (the game then starts without that mod and `PR2Loader.log` says why).
+  It reads every `*.patches` next to the exe and refuses a mod whose patches overlap another's
+  (`techniques/09-releasing-a-mod.md`).
 - **The new section.** There is no PE section in memory. The loader allocates the section
   at its file address `0x9F7000` if free, else anywhere, applies the patch data's
-  relocations and passes the address to the mod DLL in `PR2NATION_SECTION`. In the tests
-  `0x9F7000` was taken and the relocated section worked.
+  relocations and passes the address to the mod DLL in `<STEM>_SECTION` (`PR2NATION_SECTION` for
+  `PR2Nation.patches`). In the tests `0x9F7000` was taken and the relocated section worked.
 - **Patch data** (`PR2Nation.patches`) is exported from the same patch modules by
-  Sovereign Nations' `tools/export_patches.py` (it uses `pe_patch.py`'s `materialize()`), so
+  the kit's `tools/release/export_patches.py` (it uses `pe_patch.py`'s `materialize()`), so
   the file build and the memory route run the same bytes (`--check` proves it). Format:
-  Sovereign Nations' `loader/README.md`.
+  the kit's `loader/README.md`.
 - **An already patched exe** (the file route on test machines) is detected and the loader
-  stays idle. `PR2NATION_OFF=1` starts the game without the mod.
+  stays idle for that mod. `<STEM>_OFF=1` (`PR2NATION_OFF=1`) starts the game without that mod,
+  `PR2LOADER_OFF=1` without any.
 - **GOG**: not checked. A GOG `PR2.exe` byte-identical to the DRM-free image would work with
   the same data.

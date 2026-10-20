@@ -13,7 +13,7 @@ Status of each step:
 | 1–4 copy, rename, write a function, build | **yes**: copied, renamed to `MyMod`, built with GCC 16.1 (i686), no warnings |
 | 5 make a test exe that loads your DLL | **yes**: built with the kit's `pe_patch.py`; the patched entry point disassembles to the expected stub |
 | 6 run it in the test install | **yes**: run in game with the kit's tools on 19 Oct 2026 (below) |
-| 7 build an installer | not checked end to end |
+| 7 build an installer | **yes**: the template's release built with the kit's tools, installed by its setup into a copy of the test install, run in game alone and next to Sovereign Nations, uninstalled byte-identical (20 Oct 2026, `techniques/09-releasing-a-mod.md`) |
 
 ## 1. Copy the template
 
@@ -31,7 +31,7 @@ Edit `..\my-mod\dll\mod.h`:
 
 This one name is used for the DLL (`MyMod.dll`), the log (`MyMod.log`), the dev switch
 (`MyMod.dev`) and the console file (`MyMod.cmd`), all next to the game exe. `install.json`
-has its own copy of the name (`name`, `dll`, `patch_data`): change it there too. Pick a prefix
+has its own copy of the name (`name`, `dll`, `patch_data`, `logs`): change it there too. Pick a prefix
 for your Lua functions too (`MyMod_...`): Lua globals are shared with the game and with
 other mods.
 
@@ -141,8 +141,10 @@ nothing uses your mouse or keyboard.
    ```
    (delete `MyMod.log` from the test install if you no longer need it).
 
-If the hook line says `original bytes differ, NOT installed`, another DLL already owns the
-frame hook (for example Sovereign Nations in the same install): test your mod alone. Loose
+If another mod's DLL hooked the frame first, the hook line ends in `chained behind another
+mod's hook` and both run (`dll/hook.c`). If it says `original bytes differ, NOT installed`,
+something other than a hook changed those bytes (or the other DLL has an older `hook.c` that
+does not chain): test your mod alone. Loose
 files another mod left in the test install (`env.py status` lists them) take part in your test
 too; move them aside first.
 
@@ -164,12 +166,39 @@ before (all 752 files of the install compared by hash).
 
 ## 7. Make an installer
 
-Copy Sovereign Nations' release tools from its repository (`techniques/09-releasing-a-mod.md`): export your patch
-modules with `export_patches.py --check` (set the `dll` record to your DLL's name), build the
-loader unchanged, point `release.py` at your DLL and data folder, change the names at the top of
-the setup (`installer/sn_setup.py`), then run `test_installer.py` and, in a Steam install you may
-test on, install, launch from Steam and uninstall. `template/install.json` lists what your
-release needs. Not checked end to end for the template mod.
+The kit builds the player's release from `install.json` (`techniques/09-releasing-a-mod.md`):
+the setup program, the loader, your DLL, its patch data and your data files, zipped. Edit
+`..\my-mod\install.json` first: `name` and `dll` (`_build/MyMod.dll`), `patch_data`
+(`_build/loader/MyMod.patches`: the loader reads every `*.patches` next to the exe, so the file
+name must be your mod's), `logs` (`MyMod.log`) and the setup's `title`. Keep `"patches": []`
+while your mod needs no exe patch: the loader loads your DLL without one. Then:
+
+```
+python tools\release\build_release.py ..\my-mod\install.json
+python tools\release\test_setup.py --release ..\my-mod\_build\release\MyMod_v0.1
+```
+
+Expected: `built ...MyMod.dll`, `built ..._build\loader\version.dll`, `wrote
+..._build\loader\MyMod.patches: 0 patches from 0 module(s), no section, relocs 0+0, dll
+MyMod.dll`, `check: none of 9 release files is one of the game's ... files`, and
+`..._build\release\MyMod_v0.1.zip (... KB), setup exe` (without PyInstaller the setup is a
+script and a `.bat`). `test_setup.py` installs, shares, updates and uninstalls it on throw-away
+folders: `setup tests: 9 pass, 0 fail`.
+
+The release folder has `MyMod Setup.exe`, `HOW TO INSTALL.txt` / `.html`, `VERSION.txt`, your
+`docs`, and `mod\` (`version.dll`, `MyMod.dll`, `MyMod.patches`, `MANIFEST.json`). A player
+runs the setup, which finds the Steam install, and starts the game from Steam as always.
+
+Your mod can be installed next to other kit mods, Sovereign Nations included: one loader serves
+all of them, the setups share it, and two DLLs may hook the same function (the frame hook
+chains). Two mods cannot run together only if their exe patches overlap; the loader then starts
+the first one in file-name order and says why in `PR2Loader.log` (the rules:
+`techniques/09-releasing-a-mod.md`).
+
+Before a public release, test it in a Steam install you may test on: install, launch from
+Steam, check `PR2Loader.log`, uninstall.
+
+**The run that checked this step**: see `techniques/09-releasing-a-mod.md`, "Checked end to end".
 
 ## Where to go next
 

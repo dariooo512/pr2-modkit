@@ -87,13 +87,25 @@ All Python tools take `--help`. Run them from the kit's folder (`python tools\..
 | [tools/kit_paths.py](tools/kit_paths.py) | the settings every tool reads (where your game files, the test install and the build output are); run it to print them | — |
 | [tools/files/](tools/files/) | `.cpr` extract and pack, `.screen` read/edit/write, `.tow` analysis and rendering, a coast-to-land `.tow` example, the Lua API name map | your game's archives (extracted) |
 | [tools/exe/](tools/exe/) | `pe_patch.py` (reproducible exe patches) and its tests, disassembly, xrefs, operand search, a checker for your own address facts, function byte dumps | the DRM-free exe |
-| [tools/test/](tools/test/) | the test install (`env.py`), the lock, the debugger host (`gamehost.py`) with background input (`cmd.py`), scripted sessions, screenshots, the Lua console, hang dumps, keep-awake, mute | a test install |
+| [tools/test/](tools/test/) | the test install (`env.py`, with the DPI flag it removes again), the lock, the debugger host (`gamehost.py`) with background input (`cmd.py`), scripted sessions with readiness waits, screenshots, the Lua console, hang dumps, keep-awake, mute | a test install |
 | [tools/live/](tools/live/) | inspecting a running game: unpacked module dumps, memory snapshot diffs, crash catching | a running test game |
 | [tools/replay/](tools/replay/) | record/replay, the differential capture (find the code behind an action), coverage, a differential fuzzer | a running test game; cl 13.10 for the fuzzer |
 | [tools/ghidra/](tools/ghidra/) | headless Ghidra scripts and a wrapper (decompile by address, call graph, constant consumers) | Ghidra |
 | [tools/reko/](tools/reko/) | Reko drivers (project generation, per-function and whole-program decoding) | a Reko build |
 | [tools/rebuild/](tools/rebuild/) | rebuilding a function from source with the game's compiler and carving it into the exe | VC++ Toolkit 2003 (cl 13.10) |
 | [reko-patches/](reko-patches/) | our changes to Reko, as patches (GPL, not MIT) | Reko 0.12.2 sources |
+
+### Using the tools from your mod's repository
+
+A mod's own repository should use these tools, not copies of them. Sovereign Nations does it
+this way, and the pattern is worth copying: clone the kit next to the mod
+(`git clone https://github.com/dariooo512/pr2-modkit`, so the two folders are side by side) or
+point the setting `PR2_KIT` at a checkout; the mod's `tools/sn_paths.py` finds it, puts the
+kit's `tools\`, `tools\test\`, `tools\exe\` and `tools\files\` on `sys.path`, and writes the
+mod's defaults for the kit's settings (above all its own test install, `PR2_TEST_ENV`) into the
+environment. Everything the mod adds is a small wrapper that imports the kit's module (its
+`sn_env.py`, `sn_session.py`, `sn_patch.py`); no submodule, no fork.
+`docs/techniques/07-testing.md` section 7 has the details.
 
 ## Conventions in these docs
 

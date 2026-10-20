@@ -31,6 +31,31 @@ static void put_rel32(uint8_t *p, uint8_t op, uint32_t from, uint32_t to)
     *(int32_t *)(p + 1) = (int32_t)(to - (from + 5));
 }
 
+/* The bytes at `at`: 0 = as expected; 1 = another mod's hook is there (a 5-byte jmp where
+ * the expected code starts), so this hook chains behind it: its handler runs first, then
+ * the jmp to the other mod's trampoline, which runs the original code; -1 = neither. */
+static int site(uint32_t at, const uint8_t *expect, int len, uint32_t *chain_to)
+{
+    const uint8_t *b = (const uint8_t *)(uintptr_t)at;
+    if (!memcmp(b, expect, len)) return 0;
+    if (b[0] == 0xE9 && expect[0] != 0xE9) {
+        *chain_to = at + 5 + (uint32_t)*(const int32_t *)(b + 1);
+        return 1;
+    }
+    return -1;
+}
+
+/* the displaced code in a trampoline: the original instructions, or the jmp it chains to */
+static uint8_t *put_displaced(uint8_t *p, const uint8_t *expect, int len, int chained, uint32_t chain_to)
+{
+    if (chained) {
+        put_rel32(p, 0xE9, (uint32_t)(uintptr_t)p, chain_to);
+        return p + 5;
+    }
+    memcpy(p, expect, len);
+    return p + len;
+}
+
 int patch_bytes(const char *name, uint32_t at, const uint8_t *expect, const uint8_t *repl, int len)
 {
     if (memcmp((void *)(uintptr_t)at, expect, len) != 0) {
@@ -44,10 +69,13 @@ int patch_bytes(const char *name, uint32_t at, const uint8_t *expect, const uint
 
 int hook_install(const char *name, uint32_t at, const uint8_t *expect, int len, HookFn fn)
 {
-    if (len < 5 || memcmp((void *)(uintptr_t)at, expect, len) != 0) {
+    uint32_t chain_to = 0;
+    int chained = len < 5 ? -1 : site(at, expect, len, &chain_to);
+    if (chained < 0) {
         log_line("HOOK %s @%08X: original bytes differ, NOT installed", name, at);
         return 0;
     }
+    if (chained) len = 5;                          /* only the other mod's jmp is displaced */
     uint8_t *t = alloc_exec(64 + len);
     if (!t) return 0;
     uint8_t *p = t;
@@ -58,24 +86,27 @@ int hook_install(const char *name, uint32_t at, const uint8_t *expect, int len, 
     *p++ = 0x83; *p++ = 0xC4; *p++ = 0x04;         /* add esp, 4          */
     *p++ = 0x9D;                                   /* popfd               */
     *p++ = 0x61;                                   /* popad               */
-    memcpy(p, expect, len); p += len;              /* displaced code      */
+    p = put_displaced(p, expect, len, chained, chain_to);  /* displaced code */
     put_rel32(p, 0xE9, (uint32_t)(uintptr_t)p, at + len); p += 5;
 
     uint8_t jmp[16];
     memset(jmp, 0x90, sizeof jmp);
     put_rel32(jmp, 0xE9, at, (uint32_t)(uintptr_t)t);
     write_code(at, jmp, len);
-    log_line("HOOK %s @%08X ok (trampoline %p)", name, at, t);
+    log_line("HOOK %s @%08X ok (trampoline %p)%s", name, at, t, chained ? ", chained behind another mod's hook" : "");
     return 1;
 }
 
 int hook_install_ret(const char *name, uint32_t at, const uint8_t *expect, int len, HookRetFn fn,
                      uint16_t ret_pop)
 {
-    if (len < 5 || len > 32 || memcmp((void *)(uintptr_t)at, expect, len) != 0) {
+    uint32_t chain_to = 0;
+    int chained = len < 5 || len > 32 ? -1 : site(at, expect, len, &chain_to);
+    if (chained < 0) {
         log_line("HOOK %s @%08X: original bytes differ, NOT installed", name, at);
         return 0;
     }
+    if (chained) len = 5;                          /* only the other mod's jmp is displaced */
     uint8_t *t = alloc_exec(64 + len);
     if (!t) return 0;
     uint8_t *p = t;
@@ -88,7 +119,7 @@ int hook_install_ret(const char *name, uint32_t at, const uint8_t *expect, int l
     *p++ = 0x75; *p++ = (uint8_t)(2 + len + 5);    /* jnz handled         */
     *p++ = 0x9D;                                   /* popfd               */
     *p++ = 0x61;                                   /* popad               */
-    memcpy(p, expect, len); p += len;              /* displaced code      */
+    p = put_displaced(p, expect, len, chained, chain_to);  /* displaced code */
     put_rel32(p, 0xE9, (uint32_t)(uintptr_t)p, at + len); p += 5;
     *p++ = 0x9D;                                   /* handled: popfd      */
     *p++ = 0x61;                                   /* popad (r->eax)      */
@@ -98,16 +129,19 @@ int hook_install_ret(const char *name, uint32_t at, const uint8_t *expect, int l
     memset(jmp, 0x90, sizeof jmp);
     put_rel32(jmp, 0xE9, at, (uint32_t)(uintptr_t)t);
     write_code(at, jmp, len);
-    log_line("HOOK %s @%08X ok (trampoline %p, may return)", name, at, t);
+    log_line("HOOK %s @%08X ok (trampoline %p, may return)%s", name, at, t, chained ? ", chained behind another mod's hook" : "");
     return 1;
 }
 
 int hook_install_jmp(const char *name, uint32_t at, const uint8_t *expect, int len, HookJmpFn fn)
 {
-    if (len < 5 || len > 32 || memcmp((void *)(uintptr_t)at, expect, len) != 0) {
+    uint32_t chain_to = 0;
+    int chained = len < 5 || len > 32 ? -1 : site(at, expect, len, &chain_to);
+    if (chained < 0) {
         log_line("HOOK %s @%08X: original bytes differ, NOT installed", name, at);
         return 0;
     }
+    if (chained) len = 5;                          /* only the other mod's jmp is displaced */
     uint8_t *t = alloc_exec(80 + len);
     if (!t) return 0;
     uint8_t *cell = t;                             /* the jump target fn returned */
@@ -122,7 +156,7 @@ int hook_install_jmp(const char *name, uint32_t at, const uint8_t *expect, int l
     *p++ = 0x75; *p++ = (uint8_t)(2 + len + 5);    /* jnz redirect        */
     *p++ = 0x9D;                                   /* popfd               */
     *p++ = 0x61;                                   /* popad               */
-    memcpy(p, expect, len); p += len;              /* displaced code      */
+    p = put_displaced(p, expect, len, chained, chain_to);  /* displaced code */
     put_rel32(p, 0xE9, (uint32_t)(uintptr_t)p, at + len); p += 5;
     *p++ = 0xA3; *(uint32_t *)p = (uint32_t)(uintptr_t)cell; p += 4;        /* redirect: mov [cell], eax */
     *p++ = 0x9D;                                   /* popfd               */
@@ -133,6 +167,6 @@ int hook_install_jmp(const char *name, uint32_t at, const uint8_t *expect, int l
     memset(jmp, 0x90, sizeof jmp);
     put_rel32(jmp, 0xE9, at, (uint32_t)(uintptr_t)entry);
     write_code(at, jmp, len);
-    log_line("HOOK %s @%08X ok (trampoline %p, may redirect)", name, at, entry);
+    log_line("HOOK %s @%08X ok (trampoline %p, may redirect)%s", name, at, entry, chained ? ", chained behind another mod's hook" : "");
     return 1;
 }

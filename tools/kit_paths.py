@@ -21,6 +21,8 @@ your own game files in `_game/` inside the kit (git-ignored), and everything the
                  with Documents where Windows says it is, also when it is redirected)
   PR2_BUILD      where the tools write logs, screenshots, backups and builds
                  default: _build
+  PR2_BACKUP_DIR where test/env.py backup-saves puts its snapshots of the Save and Run folders
+                 default: PR2_BUILD/backup
   MINGW32_BIN    the bin folder of a 32-bit MinGW-w64 GCC
                  default: MSYS2's default C:\\msys64\\mingw32\\bin, else gcc on PATH
   GHIDRA_HOME    a Ghidra install (the folder with support\\analyzeHeadless.bat); no default
@@ -77,6 +79,7 @@ TEST_EXE = setting("PR2_TEST_EXE", TEST_ENV / "PR2_target.exe")
 TEST_LOCK = setting("PR2_TEST_LOCK", TEST_ENV.with_name(TEST_ENV.name + ".lock"))
 SAVE_DIR = setting("PR2_SAVE_DIR", documents() / "Ascaron Entertainment" / "Port Royale 2" / "Save")
 BUILD = setting("PR2_BUILD", KIT / "_build")
+BACKUP_DIR = setting("PR2_BACKUP_DIR", BUILD / "backup")
 MINGW32_BIN = setting("MINGW32_BIN", Path(r"C:\msys64\mingw32\bin"))
 GHIDRA_HOME = setting("GHIDRA_HOME", None)
 REKO_HOME = setting("REKO_HOME", None)
@@ -105,7 +108,7 @@ def main():
     rows = [("PR2_BASE_EXE", BASE_EXE), ("PR2_PRISTINE", PRISTINE), ("PR2_WORKDIR", WORKDIR),
             ("PR2_TEST_ENV", TEST_ENV), ("PR2_TEST_EXE", TEST_EXE),
             ("PR2_TEST_LOCK", TEST_LOCK), ("PR2_SAVE_DIR", SAVE_DIR),
-            ("PR2_BUILD", BUILD), ("MINGW32_BIN", MINGW32_BIN), ("GHIDRA_HOME", GHIDRA_HOME),
+            ("PR2_BUILD", BUILD), ("PR2_BACKUP_DIR", BACKUP_DIR), ("MINGW32_BIN", MINGW32_BIN), ("GHIDRA_HOME", GHIDRA_HOME),
             ("REKO_HOME", REKO_HOME), ("VC71_BIN", VC71_BIN)]
     for var, p in rows:
         src = "env" if os.environ.get(var) else "default"

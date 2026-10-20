@@ -4,8 +4,9 @@
  *   1. Something loads this DLL at process start: in a modder's test install a
  *      5-byte detour at the exe's entry point (patches/load_mod_dll.py, the same
  *      technique as Sovereign Nations' P06); in a player's Steam install the
- *      in-memory loader (docs/techniques/03-the-exe.md section 6). The DLL
- *      itself does not care which.
+ *      kit's loader (loader/README.md), which reads HelloMod.patches (made by
+ *      tools/release/export_patches.py from install.json). The DLL itself does
+ *      not care which.
  *   2. DllMain opens the log and installs one runtime hook on A2dLib's
  *      CWalhallaClient::InputProcessor, which the game calls once per frame on
  *      its main thread. Everything that touches game objects runs from there.
@@ -23,9 +24,8 @@
 
 /* A2dLib-2.20A.dll + 0x2F2C0 = CWalhallaClient::InputProcessor.
  * Original bytes: push ebx; push ebp; push esi; push edi; mov ebp, ecx.
- * Only one DLL can own this hook: if another mod (for example Sovereign
- * Nations) already detoured it, hook_install sees different bytes, logs
- * "original bytes differ, NOT installed" and leaves the game alone. */
+ * Sovereign Nations hooks it too: whichever DLL comes second finds the
+ * other's jmp there and chains behind it (hook.c), so both run each frame. */
 #define A2D_INPUTPROCESSOR_RVA 0x2F2C0
 
 static void exe_dir_file(char *path, const char *name)
