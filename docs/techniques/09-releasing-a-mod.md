@@ -53,7 +53,7 @@ a working example. Paths are relative to the file.
   loader, exports the patch data with `--check`, copies the files, writes `MANIFEST.json`, the
   player's `HOW TO INSTALL.txt` / `.html` and `VERSION.txt`, freezes the setup with PyInstaller when
   it is installed (otherwise a script and a `.bat` that need Python), runs the game-file check and
-  zips it. `--dgvoodoo DIR` adds dgVoodoo2's unmodified files from an official release (its licence
+  zips it. `--dgvoodoo DIR` adds dgVoodoo2's unmodified DLLs and its `dgVoodoo.conf` with the watermark switched off, from an official release (its licence
   allows shipping them with a game mod).
 
 ## One loader, many mods: the rules

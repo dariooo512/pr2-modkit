@@ -19,7 +19,8 @@ Steps (techniques/09-releasing-a-mod.md):
      the settings PR2_PRISTINE and PR2_TEST_ENV that exist) and of the extracted archives
      (--workdir, default PR2_WORKDIR) and refuses to build if any release file equals one of them,
      or if the release contains a game file type (.cpr, .pr2, PR2.exe, any .exe but the setup).
---dgvoodoo DIR adds dgVoodoo2's unmodified D3D8.dll / D3DImm.dll / DDraw.dll and dgVoodoo.conf from
+--dgvoodoo DIR adds dgVoodoo2's unmodified D3D8.dll / D3DImm.dll / DDraw.dll and its dgVoodoo.conf (with the
+watermark switched off) from
 an official dgVoodoo2 release folder (its licence lets a game mod ship them unmodified); the setup
 installs them only when the player ticks the box (install.json setup.dgvoodoo).
 """
@@ -31,6 +32,7 @@ import hashlib
 import html
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -48,6 +50,15 @@ import mod_setup  # noqa: E402  (loader_version: the same test the setup makes)
 
 DGV_FILES = ("D3D8.dll", "D3DImm.dll", "DDraw.dll", "dgVoodoo.conf")
 SETUP = HERE / "mod_setup.py"
+
+
+def no_watermark(conf: Path):
+    """The official dgVoodoo.conf shows a dgVoodoo logo in the game's corner; switch it off."""
+    raw = conf.read_bytes()
+    new, n = re.subn(rb"(?m)^(dgVoodooWatermark\s*=\s*)true", rb"\1false", raw)
+    if n != 1:
+        raise ConfigError(f"{conf}: no 'dgVoodooWatermark = true' line to switch off")
+    conf.write_bytes(new)
 
 HOW_TO = r"""{name_upper} {version}
 HOW TO INSTALL
@@ -210,6 +221,8 @@ def build(cfg: Config, dgvoodoo: Path | None = None, check=True, game_dirs=None,
             src = next(iter(Path(dgvoodoo).rglob(n)), None)
             if src:
                 shutil.copy2(src, mod / n)
+                if n == "dgVoodoo.conf":
+                    no_watermark(mod / n)
                 man["dgvoodoo"][n] = sha256(mod / n)
     (mod / "MANIFEST.json").write_text(json.dumps(man, indent=1), encoding="utf-8")
     frozen = freeze(cfg, out)
